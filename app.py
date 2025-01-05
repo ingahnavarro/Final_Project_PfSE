@@ -1,15 +1,15 @@
 import streamlit as st
 from dataclasses import dataclass
-import timber_nds.essentials as te
-import timber_nds.calculation as tc
-from timber_nds.design import WoodElementCalculator
+import timber_nds.essentials as essentials
+import timber_nds.calculation as calculation
+from timber_nds.essentials import Forces
+from timber_nds.design import WoodElementCalculator, DemandCapacityRatioCalculator
 import matplotlib.pyplot as plt
 import numpy as np
 
 st.title("Calculadora de Elementos de Madera")
 
 
-# --- Data Classes (same as before) ---
 @dataclass
 class WoodMaterial:
     name: str
@@ -21,7 +21,6 @@ class WoodMaterial:
     compression_perpendicular_strength: float
     compression_parallel_strength: float
     elastic_modulus: float
-    color: str
 
 
 @dataclass
@@ -111,16 +110,6 @@ class ElasticModulusAdjustmentFactors:
     due_format_conversion: float
 
 
-@dataclass
-class Forces:
-    axial_force: float  # in kgf
-    shear_y: float  # in kgf
-    shear_z: float  # in kgf
-    moment_xx: float  # in kgf*m
-    moment_yy: float  # in kgf*m
-    moment_zz: float  # in kgf*m
-
-
 # --- Sidebar for Input Parameters ---
 st.sidebar.title("Parámetros de Entrada")
 main_tabs = st.sidebar.tabs(["Propiedades", "Factores", "Fuerzas"])
@@ -129,7 +118,7 @@ with main_tabs[0]:  # Propiedades Tab
     st.header("Propiedades del Material")
     material_name = st.text_input("Nombre del Material", value="Madera Genérica", key='material_name')
     specific_gravity = st.number_input("Peso Específico", value=0.6, key='specific_gravity')
-    fibre_saturation_point = st.number_input("Punts de Saturación de Fibra", value=0.25, key='fibre_saturation_point')
+    fibre_saturation_point = st.number_input("Punto de Saturación de Fibra", value=0.25, key='fibre_saturation_point')
     tension_strength = st.number_input("Resistencia a la Tracción (kgf/cm²)", value=100.0, key='tension_strength')
     bending_strength = st.number_input("Resistencia a la Flexión (kgf/cm²)", value=150.0, key='bending_strength')
     shear_strength = st.number_input("Resistencia al Corte (kgf/cm²)", value=25.0, key='shear_strength')
@@ -139,7 +128,6 @@ with main_tabs[0]:  # Propiedades Tab
     compression_parallel_strength = st.number_input("Resistencia a la Compresión Paralela (kgf/cm²)", value=120.0,
                                                     key='comp_para_strength')
     elastic_modulus = st.number_input("Módulo de Elasticidad (kgf/cm²)", value=100000.0, key='elastic_modulus')
-    color = st.text_input("Color", value="Marrón", key='color')
 
     st.header("Propiedades de la Sección")
     section_name = st.text_input("Nombre de la Sección", value="Sección Rectangular", key='section_name')
@@ -263,7 +251,7 @@ with main_tabs[2]:  # Fuerzas Tab
 material = WoodMaterial(
     material_name, specific_gravity, fibre_saturation_point, tension_strength,
     bending_strength, shear_strength, compression_perpendicular_strength,
-    compression_parallel_strength, elastic_modulus, color
+    compression_parallel_strength, elastic_modulus
 )
 section = RectangularSection(section_name, depth, width)
 member = MemberDefinition(member_name, length, k_yy, k_zz)
@@ -329,8 +317,7 @@ forces = Forces(
     axial_force, shear_y, shear_z, moment_xx, moment_yy, moment_zz
 )
 
-# Convert section dimensions from cm to m for calculations
-section_properties = tc.RectangularSectionProperties(section.width / 100, section.depth / 100)
+section_properties = calculation.RectangularSectionProperties(section.width, section.depth)
 
 # Wood Element Calculator Instance
 calculator = WoodElementCalculator(
@@ -339,75 +326,95 @@ calculator = WoodElementCalculator(
     elastic_modulus_factors, material, section_properties
 )
 
-# --- Cross-Section Visualization ---
-st.header("Visualización de la Sección Transversal")
+# --- Main Tabs ---
+main_tabs_results = st.tabs(["Sección Transversal", "Resultados", "Relación Demanda Capacidad"])
 
-fig, ax = plt.subplots(figsize=(4, 2))
-ax.set_xlim(0, section.width)
-ax.set_ylim(0, section.depth)
-ax.add_patch(plt.Rectangle((0, 0), section.width, section.depth, fc='burlywood', ec='black'))
+with main_tabs_results[0]:  # Cross-Section Visualization
+    st.header("Visualización de la Sección Transversal")
 
-# Add wood grain
-num_lines = 50
-grain_colors = ['darkgoldenrod', 'peru']
-for j, grain_color in enumerate(grain_colors):
-    for i in range(num_lines):
-        y = np.linspace(0, section.depth, num_lines + 2)[i + 1]
+    fig, ax = plt.subplots(figsize=(4, 2))
+    ax.set_xlim(0, section.width)
+    ax.set_ylim(0, section.depth)
+    ax.add_patch(plt.Rectangle((0, 0), section.width, section.depth, fc='burlywood', ec='black'))
 
-        # Calculate start and end points for rotated line
-        x0 = 0
-        y0 = y
-        x1 = section.width
-        y1 = y
+    # Add wood grain
+    num_lines = 50
+    grain_colors = ['darkgoldenrod', 'peru']
+    for j, grain_color in enumerate(grain_colors):
+        for i in range(num_lines):
+            y = np.linspace(0, section.depth, num_lines + 2)[i + 1]
 
-        angle_degrees = 5
-        angle_radians = np.deg2rad(angle_degrees)
+            # Calculate start and end points for rotated line
+            x0 = 0
+            y0 = y
+            x1 = section.width
+            y1 = y
 
-        # Rotate both end points
-        x0_rotated = (x0 * np.cos(angle_radians) - y0 * np.sin(angle_radians))
-        y0_rotated = (x0 * np.sin(angle_radians) + y0 * np.cos(angle_radians))
+            angle_degrees = 5
+            angle_radians = np.deg2rad(angle_degrees)
 
-        x1_rotated = (x1 * np.cos(angle_radians) - y1 * np.sin(angle_radians))
-        y1_rotated = (x1 * np.sin(angle_radians) + y1 * np.cos(angle_radians))
+            # Rotate both end points
+            x0_rotated = (x0 * np.cos(angle_radians) - y0 * np.sin(angle_radians))
+            y0_rotated = (x0 * np.sin(angle_radians) + y0 * np.cos(angle_radians))
 
-        # Calculate center
-        center_x = section.width / 2
-        center_y = section.depth / 2
+            x1_rotated = (x1 * np.cos(angle_radians) - y1 * np.sin(angle_radians))
+            y1_rotated = (x1 * np.sin(angle_radians) + y1 * np.cos(angle_radians))
 
-        # Rotate around the center of the rectangle
-        x0_rotated_center = 2 * (x0 - 2 * center_x) * np.cos(angle_radians) - 2 * (y0 - 2 * center_y) * np.sin(
-            angle_radians) + center_x
-        y0_rotated_center = 2 * (x0 - center_x) * np.sin(angle_radians) + 2 * (y0 - center_y) * np.cos(
-            angle_radians) + center_y
+            # Calculate center
+            center_x = section.width / 2
+            center_y = section.depth / 2
 
-        x1_rotated_center = 2 * (x1 - center_x) * np.cos(angle_radians) - 2 * (y1 - center_y) * np.sin(
-            angle_radians) + center_x
-        y1_rotated_center = 2 * (x1 - center_x) * np.sin(angle_radians) + 2 * (y1 - center_y) * np.cos(
-            angle_radians) + center_y
+            # Rotate around the center of the rectangle
+            x0_rotated_center = 2 * (x0 - 2 * center_x) * np.cos(angle_radians) - 2 * (y0 - 2 * center_y) * np.sin(
+                angle_radians) + center_x
+            y0_rotated_center = 2 * (x0 - center_x) * np.sin(angle_radians) + 2 * (y0 - center_y) * np.cos(
+                angle_radians) + center_y
 
-        # Offset the lines slightly to avoid overlap
-        offset = (j * 2)  # Adjust the offset as needed
+            x1_rotated_center = 2 * (x1 - center_x) * np.cos(angle_radians) - 2 * (y1 - center_y) * np.sin(
+                angle_radians) + center_x
+            y1_rotated_center = 2 * (x1 - center_x) * np.sin(angle_radians) + 2 * (y1 - center_y) * np.cos(
+                angle_radians) + center_y
 
-        ax.plot([x0_rotated_center + offset, x1_rotated_center + offset],
-                [y0_rotated_center + offset, y1_rotated_center + offset], color=grain_color,
-                linewidth=0.25)
+            # Offset the lines slightly to avoid overlap
+            offset = (j * 2)  # Adjust the offset as needed
 
-ax.set_aspect('equal', adjustable='box')
-ax.set_xlabel("Ancho (cm)")
-ax.set_ylabel("Altura (cm)")
-ax.set_title("Sección")
-st.pyplot(fig)
+            ax.plot([x0_rotated_center + offset, x1_rotated_center + offset],
+                    [y0_rotated_center + offset, y1_rotated_center + offset], color=grain_color,
+                    linewidth=0.25)
 
-# --- Results ---
-st.header("Resultados")
-try:
-    st.write(f"Resistencia a la Tracción: {calculator.section_tension_strength():.2f} kgf")
-    st.write(f"Resistencia a la Flexión (yy): {calculator.section_bending_strength('yy'):.2f} kgf*m")
-    st.write(f"Resistencia a la Flexión (zz): {calculator.section_bending_strength('zz'):.2f} kgf*m")
-    st.write(f"Resistencia al Corte: {calculator.section_shear_strength():.2f} kgf")
-    st.write(f"Resistencia a la Compresión (yy): {calculator.section_compression_strength('yy'):.2f} kgf")
-    st.write(f"Resistencia a la Compresión (zz): {calculator.section_compression_strength('zz'):.2f} kgf")
-    st.write(f"Resistencia a la Compresión Perpendicular: {calculator.section_compression_perp_strength():.2f} kgf")
+    ax.set_aspect('equal', adjustable='box')
+    ax.set_xlabel("Ancho (cm)")
+    ax.set_ylabel("Altura (cm)")
+    ax.set_title("Sección")
+    st.pyplot(fig)
 
-except (ZeroDivisionError, TypeError, ValueError) as e:
-    st.error(f"Error en el cálculo: {e}")
+with main_tabs_results[1]:  # Results
+    st.header("Resultados")
+    try:
+        st.write(f"Resistencia a la Tracción: {calculator.section_tension_strength():.2f} kgf")
+        st.write(f"Resistencia a la Flexión (yy): {calculator.section_bending_strength('yy'):.2f} kgf*m")
+        st.write(f"Resistencia a la Flexión (zz): {calculator.section_bending_strength('zz'):.2f} kgf*m")
+        st.write(f"Resistencia al Corte: {calculator.section_shear_strength():.2f} kgf")
+        st.write(f"Resistencia a la Compresión (yy): {calculator.section_compression_strength('yy'):.2f} kgf")
+        st.write(f"Resistencia a la Compresión (zz): {calculator.section_compression_strength('zz'):.2f} kgf")
+        st.write(f"Resistencia a la Compresión Perpendicular: {calculator.section_compression_perp_strength():.2f} kgf")
+
+    except (ZeroDivisionError, TypeError, ValueError) as e:
+        st.error(f"Error en el cálculo: {e}")
+
+with main_tabs_results[2]:  # Demand Capacity Ratio
+    st.header("Relación Demanda/Capacidad")
+
+    dcr_calculator = DemandCapacityRatioCalculator(calculator, forces)
+    ratios = dcr_calculator.calculate_ratios()
+
+    try:
+        if 'flexo_tension' in ratios:
+            st.write(f"Relación Demanda/Capacidad a Flexotracción: {ratios['flexo_tension']:.2f}")
+        if 'flexo_compression' in ratios:
+            st.write(f"Relación Demanda/Capacidad a Flexocompresión: {ratios['flexo_compression']:.2f}")
+        st.write(f"Relación Demanda/Capacidad a Corte (y): {ratios['shear_y']:.2f}")
+        st.write(f"Relación Demanda/Capacidad a Corte (z): {ratios['shear_z']:.2f}")
+
+    except (ZeroDivisionError, TypeError, ValueError) as e:
+        st.error(f"Error en el cálculo: {e}")
