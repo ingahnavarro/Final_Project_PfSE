@@ -3,3 +3,4 @@ matplotlib>=3.10.0
 numpy>=2.2.1
 dataclasses>=0.6
 timber_nds>=0.1.0
+tqdm>=4.67.1
