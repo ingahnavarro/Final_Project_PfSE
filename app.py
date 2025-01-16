@@ -1,420 +1,507 @@
 import streamlit as st
-from dataclasses import dataclass
-import timber_nds.essentials as essentials
-import timber_nds.calculation as calculation
-from timber_nds.essentials import Forces
-from timber_nds.design import WoodElementCalculator, DemandCapacityRatioCalculator
 import matplotlib.pyplot as plt
+import matplotlib.patches as patches
+import pandas as pd
+from dataclasses import dataclass
+from typing import List, Dict, Union, Literal
 import numpy as np
+import os
+import operator
 
-st.title("Calculadora de Elementos de Madera")
-
-
-@dataclass
-class WoodMaterial:
-    name: str
-    specific_gravity: float
-    fibre_saturation_point: float
-    tension_strength: float
-    bending_strength: float
-    shear_strength: float
-    compression_perpendicular_strength: float
-    compression_parallel_strength: float
-    elastic_modulus: float
-
-
-@dataclass
-class RectangularSection:
-    name: str
-    depth: float  # in cm
-    width: float  # in cm
-
-
-@dataclass
-class MemberDefinition:
-    name: str
-    length: float  # in cm
-    effective_length_factor_yy: float
-    effective_length_factor_zz: float
-
-
-@dataclass
-class TensionAdjustmentFactors:
-    due_moisture: float
-    due_temperature: float
-    due_size: float
-    due_incising: float
-    due_format_conversion: float
-    due_resistance_reduction: float
-    due_time_effect: float
-
-
-@dataclass
-class BendingAdjustmentFactors:
-    due_moisture: float
-    due_temperature: float
-    due_beam_stability: float
-    due_size: float
-    due_flat_use: float
-    due_incising: float
-    due_repetitive_member: float
-    due_format_conversion: float
-    due_resistance_reduction: float
-    due_time_effect: float
-
-
-@dataclass
-class ShearAdjustmentFactors:
-    due_moisture: float
-    due_temperature: float
-    due_incising: float
-    due_format_conversion: float
-    due_resistance_reduction: float
-    due_time_effect: float
-
-
-@dataclass
-class CompressionAdjustmentFactors:
-    due_moisture: float
-    due_temperature: float
-    due_size: float
-    due_incising: float
-    due_column_stability: float
-    due_format_conversion: float
-    due_resistance_reduction: float
-    due_time_effect: float
-
-
-@dataclass
-class PerpendicularAdjustmentFactors:
-    due_moisture: float
-    due_temperature: float
-    due_beam_stability: float
-    due_size: float
-    due_flat_use: float
-    due_incising: float
-    due_repetitive_member: float
-    due_column_stability: float
-    due_buckling_stiffness: float
-    due_bearing_area: float
-    due_format_conversion: float
-    due_resistance_reduction: float
-    due_time_effect: float
-
-
-@dataclass
-class ElasticModulusAdjustmentFactors:
-    due_moisture: float
-    due_temperature: float
-    due_incising: float
-    due_format_conversion: float
-
-
-# --- Sidebar for Input Parameters ---
-st.sidebar.title("Parámetros de Entrada")
-main_tabs = st.sidebar.tabs(["Propiedades", "Factores", "Fuerzas"])
-
-with main_tabs[0]:  # Propiedades Tab
-    st.header("Propiedades del Material")
-    material_name = st.text_input("Nombre del Material", value="Madera Genérica", key='material_name')
-    specific_gravity = st.number_input("Peso Específico", value=0.6, key='specific_gravity')
-    fibre_saturation_point = st.number_input("Punto de Saturación de Fibra", value=0.25, key='fibre_saturation_point')
-    tension_strength = st.number_input("Resistencia a la Tracción (kgf/cm²)", value=100.0, key='tension_strength')
-    bending_strength = st.number_input("Resistencia a la Flexión (kgf/cm²)", value=150.0, key='bending_strength')
-    shear_strength = st.number_input("Resistencia al Corte (kgf/cm²)", value=25.0, key='shear_strength')
-    compression_perpendicular_strength = st.number_input("Resistencia a la Compresión Perpendicular (kgf/cm²)",
-                                                         value=30.0,
-                                                         key='comp_perp_strength')
-    compression_parallel_strength = st.number_input("Resistencia a la Compresión Paralela (kgf/cm²)", value=120.0,
-                                                    key='comp_para_strength')
-    elastic_modulus = st.number_input("Módulo de Elasticidad (kgf/cm²)", value=100000.0, key='elastic_modulus')
-
-    st.header("Propiedades de la Sección")
-    section_name = st.text_input("Nombre de la Sección", value="Sección Rectangular", key='section_name')
-    depth = st.number_input("Altura (cm)", value=20.0, key='depth')
-    width = st.number_input("Ancho (cm)", value=10.0, key='width')
-
-    st.header("Propiedades del Miembro")
-    member_name = st.text_input("Nombre del Miembro", value="Viga Principal", key='member_name')
-    length = st.number_input("Longitud (cm)", value=300.0, key='length')
-    k_yy = st.number_input("Factor k_yy", value=1.0, key='k_yy')
-    k_zz = st.number_input("Factor k_zz", value=1.0, key='k_zz')
-
-with main_tabs[1]:  # Factores Tab
-    st.subheader("Ajuste a la Tracción")
-    factor_tension_moisture = st.number_input("Humedad", value=1.0, key='tension_moisture')
-    factor_tension_temperature = st.number_input("Temperatura", value=1.0, key='tension_temperature')
-    factor_tension_size = st.number_input("Tamaño", value=1.0, key='tension_size')
-    factor_tension_incising = st.number_input("Incisión", value=1.0, key='tension_incising')
-    factor_tension_format_conversion = st.number_input("Conversión de Formato", value=1.0, key='tension_format')
-    factor_tension_resistance_reduction = st.number_input("Reducción de Resistencia", value=1.0,
-                                                          key='tension_resistance')
-    factor_tension_time_effect = st.number_input("Efecto del Tiempo", value=1.0, key='tension_time')
-
-    st.subheader("Ajuste a la Flexión (yy)")
-    factor_bending_yy_moisture = st.number_input("Humedad", value=1.0, key='bending_yy_moisture')
-    factor_bending_yy_temperature = st.number_input("Temperatura", value=1.0, key='bending_yy_temperature')
-    factor_bending_yy_beam_stability = st.number_input("Estabilidad de la Viga", value=1.0, key='bending_yy_stability')
-    factor_bending_yy_size = st.number_input("Tamaño", value=1.0, key='bending_yy_size')
-    factor_bending_yy_flat_use = st.number_input("Uso Plano", value=1.0, key='bending_yy_flat')
-    factor_bending_yy_incising = st.number_input("Incisión", value=1.0, key='bending_yy_incising')
-    factor_bending_yy_repetitive_member = st.number_input("Miembro Repetitivo", value=1.0, key='bending_yy_repetitive')
-    factor_bending_yy_format_conversion = st.number_input("Conversión de Formato", value=1.0, key='bending_yy_format')
-    factor_bending_yy_resistance_reduction = st.number_input("Reducción de Resistencia", value=1.0,
-                                                             key='bending_yy_resistance')
-    factor_bending_yy_time_effect = st.number_input("Efecto del Tiempo", value=1.0, key='bending_yy_time')
-
-    st.subheader("Ajuste a la Flexión (zz)")
-    factor_bending_zz_moisture = st.number_input("Humedad", value=1.0, key='bending_zz_moisture')
-    factor_bending_zz_temperature = st.number_input("Temperatura", value=1.0, key='bending_zz_temperature')
-    factor_bending_zz_beam_stability = st.number_input("Estabilidad de la Viga", value=1.0, key='bending_zz_stability')
-    factor_bending_zz_size = st.number_input("Tamaño", value=1.0, key='bending_zz_size')
-    factor_bending_zz_flat_use = st.number_input("Uso Plano", value=1.0, key='bending_zz_flat')
-    factor_bending_zz_incising = st.number_input("Incisión", value=1.0, key='bending_zz_incising')
-    factor_bending_zz_repetitive_member = st.number_input("Miembro Repetitivo", value=1.0, key='bending_zz_repetitive')
-    factor_bending_zz_format_conversion = st.number_input("Conversión de Formato", value=1.0, key='bending_zz_format')
-    factor_bending_zz_resistance_reduction = st.number_input("Reducción de Resistencia", value=1.0,
-                                                             key='bending_zz_resistance')
-    factor_bending_zz_time_effect = st.number_input("Efecto del Tiempo", value=1.0, key='bending_zz_time')
-
-    st.subheader("Ajuste al Corte")
-    factor_shear_moisture = st.number_input("Humedad", value=1.0, key='shear_moisture')
-    factor_shear_temperature = st.number_input("Temperatura", value=1.0, key='shear_temperature')
-    factor_shear_incising = st.number_input("Incisión", value=1.0, key='shear_incising')
-    factor_shear_format_conversion = st.number_input("Conversión de Formato", value=1.0, key='shear_format')
-    factor_shear_resistance_reduction = st.number_input("Reducción de Resistencia", value=1.0, key='shear_resistance')
-    factor_shear_time_effect = st.number_input("Efecto del Tiempo", value=1.0, key='shear_time')
-
-    st.subheader("Ajuste a la Compresión (yy)")
-    factor_compression_yy_moisture = st.number_input("Humedad", value=1.0, key='compression_yy_moisture')
-    factor_compression_yy_temperature = st.number_input("Temperatura", value=1.0, key='compression_yy_temperature')
-    factor_compression_yy_size = st.number_input("Tamaño", value=1.0, key='compression_yy_size')
-    factor_compression_yy_incising = st.number_input("Incisión", value=1.0, key='compression_yy_incising')
-    factor_compression_yy_column_stability = st.number_input("Estabilidad de la Columna", value=1.0,
-                                                             key='compression_yy_stability')
-    factor_compression_yy_format_conversion = st.number_input("Conversión de Formato", value=1.0,
-                                                              key='compression_yy_format')
-    factor_compression_yy_resistance_reduction = st.number_input("Reducción de Resistencia", value=1.0,
-                                                                 key='compression_yy_resistance')
-    factor_compression_yy_time_effect = st.number_input("Efecto del Tiempo", value=1.0, key='compression_yy_time')
-
-    st.subheader("Ajuste a la Compresión (zz)")
-    factor_compression_zz_moisture = st.number_input("Humedad", value=1.0, key='compression_zz_moisture')
-    factor_compression_zz_temperature = st.number_input("Temperatura", value=1.0, key='compression_zz_temperature')
-    factor_compression_zz_size = st.number_input("Tamaño", value=1.0, key='compression_zz_size')
-    factor_compression_zz_incising = st.number_input("Incisión", value=1.0, key='compression_zz_incising')
-    factor_compression_zz_column_stability = st.number_input("Estabilidad de la Columna", value=1.0,
-                                                             key='compression_zz_stability')
-    factor_compression_zz_format_conversion = st.number_input("Conversión de Formato", value=1.0,
-                                                              key='compression_zz_format')
-    factor_compression_zz_resistance_reduction = st.number_input("Reducción de Resistencia", value=1.0,
-                                                                 key='compression_zz_resistance')
-    factor_compression_zz_time_effect = st.number_input("Efecto del Tiempo", value=1.0, key='compression_zz_time')
-
-    st.subheader("Ajuste a la Compresión Perpendicular")
-    factor_compression_perp_moisture = st.number_input("Humedad", value=1.0, key='compression_perp_moisture')
-    factor_compression_perp_temperature = st.number_input("Temperatura", value=1.0, key='compression_perp_temperature')
-    factor_compression_perp_beam_stability = st.number_input("Estabilidad de la Viga", value=1.0,
-                                                             key='compression_perp_stability')
-    factor_compression_perp_size = st.number_input("Tamaño", value=1.0, key='compression_perp_size')
-    factor_compression_perp_flat_use = st.number_input("Uso Plano", value=1.0, key='compression_perp_flat')
-    factor_compression_perp_incising = st.number_input("Incisión", value=1.0, key='compression_perp_incising')
-    factor_compression_perp_repetitive_member = st.number_input("Miembro Repetitivo", value=1.0,
-                                                                key='compression_perp_repetitive')
-    factor_compression_perp_column_stability = st.number_input("Estabilidad de la Columna", value=1.0,
-                                                               key='compression_perp_column_stability')
-    factor_compression_perp_buckling_stiffness = st.number_input("Rigidez al Pandeo", value=1.0,
-                                                                 key='compression_perp_buckling')
-    factor_compression_perp_bearing_area = st.number_input("Área de Apoyo", value=1.0, key='compression_perp_bearing')
-    factor_compression_perp_format_conversion = st.number_input("Conversión de Formato", value=1.0,
-                                                                key='compression_perp_format')
-    factor_compression_perp_resistance_reduction = st.number_input("Reducción de Resistencia", value=1.0,
-                                                                   key='compression_perp_resistance')
-    factor_compression_perp_time_effect = st.number_input("Efecto del Tiempo", value=1.0, key='compression_perp_time')
-
-    st.subheader("Ajuste del Módulo de Elasticidad")
-    factor_elastic_moisture = st.number_input("Humedad", value=1.0, key='elastic_moisture')
-    factor_elastic_temperature = st.number_input("Temperatura", value=1.0, key='elastic_temperature')
-    factor_elastic_incising = st.number_input("Incisión", value=1.0, key='elastic_incising')
-    factor_elastic_format_conversion = st.number_input("Conversión de Formato", value=1.0, key='elastic_format')
-
-with main_tabs[2]:  # Fuerzas Tab
-    st.subheader("Fuerzas Aplicadas")
-    axial_force = st.number_input("Fuerza Axial (kgf)", value=0.0, key='axial_force')
-    shear_y = st.number_input("Corte en Y (kgf)", value=0.0, key='shear_y')
-    shear_z = st.number_input("Corte en Z (kgf)", value=0.0, key='shear_z')
-    moment_xx = st.number_input("Momento en X-X (kgf*m)", value=0.0, key='moment_xx')
-    moment_yy = st.number_input("Momento en Y-Y (kgf*m)", value=0.0, key='moment_yy')
-    moment_zz = st.number_input("Momento en Z-Z (kgf*m)", value=0.0, key='moment_zz')
-
-# --- Create Dataclass Instances ---
-material = WoodMaterial(
-    material_name, specific_gravity, fibre_saturation_point, tension_strength,
-    bending_strength, shear_strength, compression_perpendicular_strength,
-    compression_parallel_strength, elastic_modulus
+from timber_nds.design import (
+    check_for_all_elements,
+    filter_and_export_results,
+    WoodElementCalculator
 )
-section = RectangularSection(section_name, depth, width)
-member = MemberDefinition(member_name, length, k_yy, k_zz)
-
-tension_factors = TensionAdjustmentFactors(
-    factor_tension_moisture, factor_tension_temperature, factor_tension_size,
-    factor_tension_incising, factor_tension_format_conversion,
-    factor_tension_resistance_reduction, factor_tension_time_effect
+from timber_nds.calculation import (
+    RectangularSectionProperties,
+    import_robot_bar_forces,
+    create_robot_bar_forces_as_objects,
 )
 
-bending_factors_yy = BendingAdjustmentFactors(
-    factor_bending_yy_moisture, factor_bending_yy_temperature, factor_bending_yy_beam_stability,
-    factor_bending_yy_size, factor_bending_yy_flat_use, factor_bending_yy_incising,
-    factor_bending_yy_repetitive_member, factor_bending_yy_format_conversion,
-    factor_bending_yy_resistance_reduction, factor_bending_yy_time_effect
+from timber_nds.settings import (
+    WoodMaterial,
+    RectangularSection,
+    MemberDefinition,
+    Forces,
+    TensionAdjustmentFactors,
+    BendingAdjustmentFactors,
+    ShearAdjustmentFactors,
+    CompressionAdjustmentFactors,
+    PerpendicularAdjustmentFactors,
+    ElasticModulusAdjustmentFactors,
 )
 
-bending_factors_zz = BendingAdjustmentFactors(
-    factor_bending_zz_moisture, factor_bending_zz_temperature, factor_bending_zz_beam_stability,
-    factor_bending_zz_size, factor_bending_zz_flat_use, factor_bending_zz_incising,
-    factor_bending_zz_repetitive_member, factor_bending_zz_format_conversion,
-    factor_bending_zz_resistance_reduction, factor_bending_zz_time_effect
-)
 
-shear_factors = ShearAdjustmentFactors(
-    factor_shear_moisture, factor_shear_temperature, factor_shear_incising,
-    factor_shear_format_conversion, factor_shear_resistance_reduction,
-    factor_shear_time_effect
-)
+def plot_rectangular_section(section: RectangularSection, color: str) :
+    if not isinstance(section, RectangularSection) :
+        raise TypeError("The section argument must be a RectangularSection object.")
+    if section.depth <= 0 or section.width <= 0 :
+        raise ValueError("Section dimensions must be positive values.")
 
-compression_factors_yy = CompressionAdjustmentFactors(
-    factor_compression_yy_moisture, factor_compression_yy_temperature,
-    factor_compression_yy_size, factor_compression_yy_incising,
-    factor_compression_yy_column_stability, factor_compression_yy_format_conversion,
-    factor_compression_yy_resistance_reduction, factor_compression_yy_time_effect
-)
+    fig, ax = plt.subplots()
+    rect = patches.Rectangle((0, 0), section.width, section.depth, linewidth=1, edgecolor="black", facecolor=color)
+    ax.add_patch(rect)
 
-compression_factors_zz = CompressionAdjustmentFactors(
-    factor_compression_zz_moisture, factor_compression_zz_temperature,
-    factor_compression_zz_size, factor_compression_zz_incising,
-    factor_compression_zz_column_stability, factor_compression_zz_format_conversion,
-    factor_compression_zz_resistance_reduction, factor_compression_zz_time_effect
-)
+    ax.set_xlim(-0.1 * section.width, 1.1 * section.width)
+    ax.set_ylim(-0.1 * section.depth, 1.1 * section.depth)
+    ax.set_aspect("equal", adjustable="box")
+    ax.set_xlabel("Width")
+    ax.set_ylabel("Depth")
+    ax.set_title(f"Rectangular Section: {section.name}")
 
-compression_perp_factors = PerpendicularAdjustmentFactors(
-    factor_compression_perp_moisture, factor_compression_perp_temperature,
-    factor_compression_perp_beam_stability, factor_compression_perp_size,
-    factor_compression_perp_flat_use, factor_compression_perp_incising,
-    factor_compression_perp_repetitive_member,
-    factor_compression_perp_column_stability,
-    factor_compression_perp_buckling_stiffness, factor_compression_perp_bearing_area,
-    factor_compression_perp_format_conversion,
-    factor_compression_perp_resistance_reduction,
-    factor_compression_perp_time_effect
-)
-
-elastic_modulus_factors = ElasticModulusAdjustmentFactors(
-    factor_elastic_moisture, factor_elastic_temperature, factor_elastic_incising,
-    factor_elastic_format_conversion
-)
-
-forces = Forces(
-    axial_force, shear_y, shear_z, moment_xx, moment_yy, moment_zz
-)
-
-section_properties = calculation.RectangularSectionProperties(section.width, section.depth)
-
-# Wood Element Calculator Instance
-calculator = WoodElementCalculator(
-    tension_factors, bending_factors_yy, bending_factors_zz, shear_factors,
-    compression_factors_yy, compression_factors_zz, compression_perp_factors,
-    elastic_modulus_factors, material, section_properties
-)
-
-# --- Main Tabs ---
-main_tabs_results = st.tabs(["Sección Transversal", "Resultados", "Relación Demanda Capacidad"])
-
-with main_tabs_results[0]:  # Cross-Section Visualization
-    st.header("Visualización de la Sección Transversal")
-
-    fig, ax = plt.subplots(figsize=(4, 2))
-    ax.set_xlim(0, section.width)
-    ax.set_ylim(0, section.depth)
-    ax.add_patch(plt.Rectangle((0, 0), section.width, section.depth, fc='burlywood', ec='black'))
-
-    # Add wood grain
-    num_lines = 50
-    grain_colors = ['darkgoldenrod', 'peru']
-    for j, grain_color in enumerate(grain_colors):
-        for i in range(num_lines):
-            y = np.linspace(0, section.depth, num_lines + 2)[i + 1]
-
-            # Calculate start and end points for rotated line
-            x0 = 0
-            y0 = y
-            x1 = section.width
-            y1 = y
-
-            angle_degrees = 5
-            angle_radians = np.deg2rad(angle_degrees)
-
-            # Rotate both end points
-            x0_rotated = (x0 * np.cos(angle_radians) - y0 * np.sin(angle_radians))
-            y0_rotated = (x0 * np.sin(angle_radians) + y0 * np.cos(angle_radians))
-
-            x1_rotated = (x1 * np.cos(angle_radians) - y1 * np.sin(angle_radians))
-            y1_rotated = (x1 * np.sin(angle_radians) + y1 * np.cos(angle_radians))
-
-            # Calculate center
-            center_x = section.width / 2
-            center_y = section.depth / 2
-
-            # Rotate around the center of the rectangle
-            x0_rotated_center = 2 * (x0 - 2 * center_x) * np.cos(angle_radians) - 2 * (y0 - 2 * center_y) * np.sin(
-                angle_radians) + center_x
-            y0_rotated_center = 2 * (x0 - center_x) * np.sin(angle_radians) + 2 * (y0 - center_y) * np.cos(
-                angle_radians) + center_y
-
-            x1_rotated_center = 2 * (x1 - center_x) * np.cos(angle_radians) - 2 * (y1 - center_y) * np.sin(
-                angle_radians) + center_x
-            y1_rotated_center = 2 * (x1 - center_x) * np.sin(angle_radians) + 2 * (y1 - center_y) * np.cos(
-                angle_radians) + center_y
-
-            # Offset the lines slightly to avoid overlap
-            offset = (j * 2)  # Adjust the offset as needed
-
-            ax.plot([x0_rotated_center + offset, x1_rotated_center + offset],
-                    [y0_rotated_center + offset, y1_rotated_center + offset], color=grain_color,
-                    linewidth=0.25)
-
-    ax.set_aspect('equal', adjustable='box')
-    ax.set_xlabel("Ancho (cm)")
-    ax.set_ylabel("Altura (cm)")
-    ax.set_title("Sección")
     st.pyplot(fig)
 
-with main_tabs_results[1]:  # Results
-    st.header("Resultados")
-    try:
-        st.write(f"Resistencia a la Tracción: {calculator.section_tension_strength():.2f} kgf")
-        st.write(f"Resistencia a la Flexión (yy): {calculator.section_bending_strength('yy'):.2f} kgf*m")
-        st.write(f"Resistencia a la Flexión (zz): {calculator.section_bending_strength('zz'):.2f} kgf*m")
-        st.write(f"Resistencia al Corte: {calculator.section_shear_strength():.2f} kgf")
-        st.write(f"Resistencia a la Compresión (yy): {calculator.section_compression_strength('yy'):.2f} kgf")
-        st.write(f"Resistencia a la Compresión (zz): {calculator.section_compression_strength('zz'):.2f} kgf")
-        st.write(f"Resistencia a la Compresión Perpendicular: {calculator.section_compression_perp_strength():.2f} kgf")
 
-    except (ZeroDivisionError, TypeError, ValueError) as e:
-        st.error(f"Error en el cálculo: {e}")
+def main() :
+    st.sidebar.header("Wood Elements Design")
 
-with main_tabs_results[2]:  # Demand Capacity Ratio
-    st.header("Relación Demanda/Capacidad")
+    if "material" not in st.session_state :
+        st.session_state.material = None
+    if "sections" not in st.session_state :
+        st.session_state.sections = []
+    if "elements" not in st.session_state :
+        st.session_state.elements = []
+    if "forces_data" not in st.session_state :
+        st.session_state.forces_data = []
+    if "results_df" not in st.session_state :
+        st.session_state.results_df = pd.DataFrame()
+    if "adjustment_factors" not in st.session_state :
+        st.session_state.adjustment_factors = {
+            "tension" : TensionAdjustmentFactors(),
+            "bending_yy" : BendingAdjustmentFactors(),
+            "bending_zz" : BendingAdjustmentFactors(),
+            "shear" : ShearAdjustmentFactors(),
+            "compression_yy" : CompressionAdjustmentFactors(),
+            "compression_zz" : CompressionAdjustmentFactors(),
+            "compression_perp" : PerpendicularAdjustmentFactors(),
+            "elastic_modulus" : ElasticModulusAdjustmentFactors(),
+        }
+    if "saved_factors" not in st.session_state :
+        st.session_state.saved_factors = {
+            "tension" : None,
+            "bending_yy" : None,
+            "bending_zz" : None,
+            "shear" : None,
+            "compression_yy" : None,
+            "compression_zz" : None,
+            "compression_perp" : None,
+            "elastic_modulus" : None,
+        }
+    if "uploaded_file_path" not in st.session_state :
+        st.session_state.uploaded_file_path = None
 
-    dcr_calculator = DemandCapacityRatioCalculator(calculator, forces)
-    ratios = dcr_calculator.calculate_ratios()
+    tabs = ["Element", "Adjustment Factors", "Forces", "Calculate"]
+    selected_tab = st.sidebar.radio("Select Tab", tabs)
 
-    try:
-        if 'flexo_tension' in ratios:
-            st.write(f"Relación Demanda/Capacidad a Flexotracción: {ratios['flexo_tension']:.2f}")
-        if 'flexo_compression' in ratios:
-            st.write(f"Relación Demanda/Capacidad a Flexocompresión: {ratios['flexo_compression']:.2f}")
-        st.write(f"Relación Demanda/Capacidad a Corte (y): {ratios['shear_y']:.2f}")
-        st.write(f"Relación Demanda/Capacidad a Corte (z): {ratios['shear_z']:.2f}")
+    if selected_tab == "Element" :
+        st.sidebar.subheader("Material")
+        material_name = st.sidebar.text_input("Material Name", "Teca G1")
+        specific_gravity = st.sidebar.number_input("Specific Gravity", 0.1, 1.0, 0.58)
+        fibre_saturation_point = st.sidebar.number_input("Fiber Saturation Point (%)", 0.1, 50.0, 30.0)
+        tension_strength = st.sidebar.number_input("Tension Strength (kgf/cm2)", 0.1, 1000.0, 84.0)
+        bending_strength = st.sidebar.number_input("Bending Strength (kgf/cm2)", 0.1, 1000.0, 212.0)
+        shear_strength = st.sidebar.number_input("Shear Strength (kgf/cm2)", 0.1, 500.0, 94.9)
+        compression_parallel_strength = st.sidebar.number_input("Compression Parallel Strength (kgf/cm2)", 0.1,
+                                                                500.0, 81.4)
+        compression_perpendicular_strength = st.sidebar.number_input(
+            "Compression Perpendicular Strength (kgf/cm2)", 0.1, 500.0, 8.54
+        )
+        elastic_modulus = st.sidebar.number_input("Elastic Modulus (kgf/cm2)", 0.1, 500000.0, 127000.0)
+        color = st.sidebar.color_picker("Material Color", "#8B4513")
 
-    except (ZeroDivisionError, TypeError, ValueError) as e:
-        st.error(f"Error en el cálculo: {e}")
+        if st.sidebar.button("Save Material") :
+            wood_material = WoodMaterial(
+                name=material_name,
+                specific_gravity=specific_gravity,
+                fibre_saturation_point=fibre_saturation_point,
+                tension_strength=tension_strength,
+                bending_strength=bending_strength,
+                shear_strength=shear_strength,
+                compression_perpendicular_strength=compression_perpendicular_strength,
+                compression_parallel_strength=compression_parallel_strength,
+                elastic_modulus=elastic_modulus,
+                color=color,
+            )
+            st.session_state.material = wood_material
+            st.sidebar.success(f"Material '{material_name}' saved!")
+
+        if st.session_state.material :
+            st.sidebar.subheader("Current Material:")
+            st.sidebar.text(f"- Name: {st.session_state.material.name}")
+
+        st.sidebar.subheader("Section")
+        section_name = st.sidebar.text_input("Section Name", "3 x 3")
+        width = st.sidebar.number_input("Width (cm)", 1.0, 500.0, 6.4)
+        depth = st.sidebar.number_input("Depth (cm)", 1.0, 500.0, 6.4)
+
+        if st.sidebar.button("Add Section") :
+            rectangular_section = RectangularSection(name=section_name, depth=depth, width=width)
+            st.session_state.sections.append(rectangular_section)
+            st.sidebar.success(f"Section '{section_name}' added!")
+
+        st.sidebar.subheader("Added Sections:")
+        for section in st.session_state.sections :
+            st.sidebar.text(f"- {section.name} (Depth: {section.depth} cm, Width: {section.width} cm)")
+
+        st.header("Rectangular Section Visualization")
+        if st.session_state.sections and st.session_state.material:
+            plot_rectangular_section(st.session_state.sections[-1], st.session_state.material.color)
+
+        st.sidebar.subheader("Element")
+        element_name = st.sidebar.text_input("Element Name", "Column 1")
+        length = st.sidebar.number_input("Length (cm)", 10.0, 1000.0, 300.0)
+        effective_length_factor_yy = st.sidebar.number_input("Effective Length Factor YY", 0.1, 2.0, 1.0)
+        effective_length_factor_zz = st.sidebar.number_input("Effective Length Factor ZZ", 0.1, 2.0, 1.0)
+
+        member_definition = MemberDefinition(
+            name=element_name,
+            length=length,
+            effective_length_factor_yy=effective_length_factor_yy,
+            effective_length_factor_zz=effective_length_factor_zz,
+        )
+
+        if st.sidebar.button("Add Element") :
+            st.session_state.elements.append(member_definition)
+            st.sidebar.success(f"Element '{element_name}' added!")
+
+        st.sidebar.subheader("Added Elements:")
+        for element in st.session_state.elements :
+            st.sidebar.text(f"- {element.name} (Length: {element.length} cm)")
+
+    elif selected_tab == "Adjustment Factors" :
+        st.sidebar.subheader("Adjustment Factors")
+
+        factor_types = [
+            "tension", "bending_yy", "bending_zz", "shear",
+            "compression_yy", "compression_zz", "compression_perp", "elastic_modulus"
+        ]
+
+        default_factors = {
+            "tension" : {
+                "due_moisture" : 1.0,
+                "due_temperature" : 1.0,
+                "due_size" : 1.0,
+                "due_incising" : 1.0,
+                "due_format_conversion" : 2.70,
+                "due_resistance_reduction" : 0.80,
+                "due_time_effect" : 1.0
+            },
+            "bending_yy" : {
+                "due_moisture" : 1.0,
+                "due_temperature" : 1.0,
+                "due_beam_stability" : 1.0,
+                "due_size" : 1.0,
+                "due_flat_use" : 1.0,
+                "due_incising" : 1.0,
+                "due_repetitive_member" : 1.0,
+                "due_format_conversion" : 2.54,
+                "due_resistance_reduction" : 0.85,
+                "due_time_effect" : 1.0
+            },
+            "bending_zz" : {
+                "due_moisture" : 1.0,
+                "due_temperature" : 1.0,
+                "due_beam_stability" : 1.0,
+                "due_size" : 1.0,
+                "due_flat_use" : 1.0,
+                "due_incising" : 1.0,
+                "due_repetitive_member" : 1.0,
+                "due_format_conversion" : 2.54,
+                "due_resistance_reduction" : 0.85,
+                "due_time_effect" : 1.0
+            },
+            "shear" : {
+                "due_moisture" : 1.0,
+                "due_temperature" : 1.0,
+                "due_incising" : 1.0,
+                "due_format_conversion" : 2.88,
+                "due_resistance_reduction" : 0.75,
+                "due_time_effect" : 1.0
+            },
+            "compression_yy" : {
+                "due_moisture" : 1.0,
+                "due_temperature" : 1.0,
+                "due_size" : 1.0,
+                "due_incising" : 1.0,
+                "due_column_stability" : 1.0,
+                "due_format_conversion" : 2.40,
+                "due_resistance_reduction" : 0.90,
+                "due_time_effect" : 1.0
+            },
+            "compression_zz" : {
+                "due_moisture" : 1.0,
+                "due_temperature" : 1.0,
+                "due_size" : 1.0,
+                "due_incising" : 1.0,
+                "due_column_stability" : 1.0,
+                "due_format_conversion" : 2.40,
+                "due_resistance_reduction" : 0.90,
+                "due_time_effect" : 1.0
+            },
+            "compression_perp" : {
+                "due_moisture" : 1.0,
+                "due_temperature" : 1.0,
+                "due_incising" : 1.0,
+                "due_bearing_area" : 1.0,
+                "due_format_conversion" : 1.67,
+                "due_resistance_reduction" : 0.90,
+                "due_time_effect" : 1.0
+            },
+            "elastic_modulus" : {
+                "due_moisture" : 1.0,
+                "due_temperature" : 1.0,
+                "due_incising" : 1.0,
+                "due_format_conversion" : 1.76,
+                "due_resistance_reduction" : 0.85
+            },
+        }
+
+        for factor_type in factor_types :
+            st.sidebar.write(f"{factor_type.replace('_', ' ').title()}:")
+            if st.session_state.saved_factors[factor_type] :
+                for field in st.session_state.saved_factors[factor_type].__dataclass_fields__ :
+                    default_value = getattr(st.session_state.saved_factors[factor_type], field)
+                    setattr(
+                        st.session_state.adjustment_factors[factor_type],
+                        field,
+                        st.sidebar.number_input(f"{field.replace('_', ' ').title()}", value=default_value,
+                                                key=f"{factor_type}_{field}")
+                    )
+            else :
+                for field in st.session_state.adjustment_factors[factor_type].__dataclass_fields__ :
+                    default_value = default_factors[factor_type].get(field, 1.0)
+                    setattr(
+                        st.session_state.adjustment_factors[factor_type],
+                        field,
+                        st.sidebar.number_input(f"{field.replace('_', ' ').title()}", value=default_value,
+                                                key=f"{factor_type}_{field}")
+                    )
+
+        if st.sidebar.button("Save Adjustment Factors") :
+            for factor_type in factor_types :
+                st.session_state.saved_factors[factor_type] = st.session_state.adjustment_factors[factor_type]
+            st.sidebar.success("Adjustment factors saved!")
+
+    elif selected_tab == "Forces" :
+        st.sidebar.subheader("Forces")
+        uploaded_file = st.sidebar.file_uploader("Upload Forces CSV", type=["csv"])
+        if uploaded_file is not None :
+            try :
+                st.session_state.uploaded_file_path = uploaded_file.name
+                df = import_robot_bar_forces(uploaded_file)
+                if df is not None :
+                    forces_list = create_robot_bar_forces_as_objects(df)
+                    st.session_state.forces_data = forces_list
+                    st.sidebar.success("Forces loaded from CSV!")
+                else :
+                    st.sidebar.error(
+                        "Error loading forces from CSV. Please check the file format.")
+            except Exception as e :
+                st.sidebar.error(f"Error loading CSV: {e}")
+
+        st.sidebar.subheader("Loaded Forces:")
+        if st.session_state.forces_data :
+            for forces in st.session_state.forces_data :
+                st.sidebar.text(
+                    f"- Name: {forces.name}, Axial: {forces.axial}, Shear Y: {forces.shear_y}, Shear Z: {forces.shear_z}, Moment XX: {forces.moment_xx}, Moment YY: {forces.moment_yy}, Moment ZZ: {forces.moment_zz}"
+                )
+
+    elif selected_tab == "Calculate" :
+        st.header("Results")
+        st.subheader("Complete results")
+
+        if st.sidebar.button("Calculate") :
+            st.write("")
+
+            if not st.session_state.material :
+                st.error("Please define a material before continuing.")
+            elif 'forces_data' in st.session_state and st.session_state.forces_data and 'elements' in st.session_state and st.session_state.elements and 'sections' in st.session_state and st.session_state.sections :
+                tension_factors = st.session_state.adjustment_factors["tension"]
+                bending_factors_yy = st.session_state.adjustment_factors["bending_yy"]
+                bending_factors_zz = st.session_state.adjustment_factors["bending_zz"]
+                shear_factors = st.session_state.adjustment_factors["shear"]
+                compression_factors_yy = st.session_state.adjustment_factors["compression_yy"]
+                compression_factors_zz = st.session_state.adjustment_factors["compression_zz"]
+                compression_perp_factors = st.session_state.adjustment_factors["compression_perp"]
+                elastic_modulus_factors = st.session_state.adjustment_factors["elastic_modulus"]
+
+                try :
+                    st.session_state.results_df = check_for_all_elements(
+                        list_sections=st.session_state.sections,
+                        list_elements=st.session_state.elements,
+                        list_forces=st.session_state.forces_data,
+                        material=st.session_state.material,
+                        tension_factors=tension_factors,
+                        bending_factors_yy=bending_factors_yy,
+                        bending_factors_zz=bending_factors_zz,
+                        shear_factors=shear_factors,
+                        compression_factors_yy=compression_factors_yy,
+                        compression_factors_zz=compression_factors_zz,
+                        compression_perp_factors=compression_perp_factors,
+                        elastic_modulus_factors=elastic_modulus_factors,
+                    )
+                    st.write("", st.session_state.results_df)
+
+                    if st.session_state.uploaded_file_path :
+                        file_dir = os.path.dirname(st.session_state.uploaded_file_path)
+                        file_name = os.path.splitext(os.path.basename(st.session_state.uploaded_file_path))[0]
+                        output_file_path = os.path.join(file_dir, f"{file_name}_results.csv")
+
+                        st.session_state.results_df.to_csv(output_file_path, index=False, sep=';')
+                        st.success(f"Results saved to: {output_file_path}")
+                    else:
+                        st.warning("No file was uploaded. Results not saved.")
+
+                except Exception as e :
+                    st.error(f"An error occurred during calculation: {e}")
+            else :
+                st.error("Please ensure forces, elements, and sections are defined.")
+
+        if not st.session_state.results_df.empty :
+            st.subheader("Filtered Results")
+            forces_tab, strength_tab, dcr_tab = st.tabs(["Forces", "Strength", "DCR"])
+
+            with forces_tab :
+                st.subheader("Forces Data")
+                df = pd.DataFrame(st.session_state.forces_data)
+                if not df.empty :
+                    df.insert(0, 'force', df['name'])
+                    dcr_max_values = []
+                    for index, row in st.session_state.results_df.iterrows() :
+                        dcr_max_value = max(row.get(key, 0) for key in [
+                            "tension (dcr)", "biaxial bending (dcr)",
+                            "shear y (dcr)", "shear z (dcr)",
+                            "compression (dcr)", "bending and compression (dcr)"
+                        ])
+                        dcr_max_values.append(dcr_max_value)
+
+                    df['dcr_max'] = dcr_max_values
+                    st.dataframe(
+                        df[["force", "dcr_max", "axial", "shear_y", "shear_z", "moment_xx", "moment_yy", "moment_zz"]])
+
+            with strength_tab :
+                st.subheader("Section Strength")
+
+                all_capacities = []
+                for index, row in st.session_state.results_df.iterrows() :
+
+                    element = next((element for element in st.session_state.elements if element.name == row['member']),
+                                   None)
+                    section = next((section for section in st.session_state.sections if section.name == row['section']),
+                                   None)
+                    force = next((force for force in st.session_state.forces_data if force.name == row['force']), None)
+                    material = st.session_state.material
+
+                    if element and section and force and material :
+                        section_properties = RectangularSectionProperties(width=section.width, depth=section.depth)
+
+                        wood_calculator = WoodElementCalculator(
+                            tension_factors=st.session_state.adjustment_factors["tension"],
+                            bending_factors_yy=st.session_state.adjustment_factors["bending_yy"],
+                            bending_factors_zz=st.session_state.adjustment_factors["bending_zz"],
+                            shear_factors=st.session_state.adjustment_factors["shear"],
+                            compression_factors_yy=st.session_state.adjustment_factors["compression_yy"],
+                            compression_factors_zz=st.session_state.adjustment_factors["compression_zz"],
+                            compression_perp_factors=st.session_state.adjustment_factors["compression_perp"],
+                            elastic_modulus_factors=st.session_state.adjustment_factors["elastic_modulus"],
+                            material_properties=material,
+                            section_properties=section_properties,
+                        )
+
+                        tension_capacity = wood_calculator.tension_strength()
+                        bending_capacity_yy = wood_calculator.bending_strength("yy")
+                        bending_capacity_zz = wood_calculator.bending_strength("zz")
+                        shear_capacity = wood_calculator.shear_strength()
+                        compression_capacity_yy = wood_calculator.compression_strength("yy")
+                        compression_capacity_zz = wood_calculator.compression_strength("zz")
+                        compression_perp_capacity = wood_calculator.compression_perp_strength()
+
+                        dcr_max_value = max(row.get(key, 0) for key in [
+                            "tension (dcr)", "biaxial bending (dcr)",
+                            "shear y (dcr)", "shear z (dcr)",
+                            "compression (dcr)", "bending and compression (dcr)"
+                        ])
+
+                        capacity_data = {
+                            "member" : row["member"],
+                            "section" : row["section"],
+                            "force" : row["force"],
+                            "tension_capacity" : tension_capacity,
+                            "bending_yy_capacity" : bending_capacity_yy,
+                            "bending_zz_capacity" : bending_capacity_zz,
+                            "shear_capacity" : shear_capacity,
+                            "compression_yy_capacity" : compression_capacity_yy,
+                            "compression_zz_capacity" : compression_capacity_zz,
+                            "compression_perp_capacity" : compression_perp_capacity,
+                            "dcr_max" : dcr_max_value
+                        }
+                        all_capacities.append(capacity_data)
+
+                capacities_df = pd.DataFrame(all_capacities)
+                if not capacities_df.empty :
+                    st.dataframe(capacities_df[["member", "section", "force", "dcr_max", "tension_capacity",
+                                                "bending_yy_capacity", "bending_zz_capacity", "shear_capacity",
+                                                "compression_yy_capacity", "compression_zz_capacity"]])
+
+            with dcr_tab :
+                st.subheader("Demand-Capacity Ratio (DCR)")
+                dcr_columns = ["member", "section", "force"] + [col for col in st.session_state.results_df.columns if
+                                                                "(dcr)" in col]
+                df = st.session_state.results_df[dcr_columns]
+                if not df.empty :
+                    dcr_max_values = []
+                    for index, row in st.session_state.results_df.iterrows() :
+                        dcr_max_value = max(row.get(key, 0) for key in [
+                            "tension (dcr)", "shear y (dcr)", "shear z (dcr)",
+                            "compression (dcr)", "biaxial bending (dcr)", "bending and compression (dcr)"
+                        ])
+                        dcr_max_values.append(dcr_max_value)
+
+                    df['dcr_max'] = dcr_max_values
+
+                    columns_to_display = ["member", "section", "force", "dcr_max"]
+
+                    for col in df.columns :
+                        if "(dcr)" in col and "compression perpendicular (dcr)" not in col :
+                            columns_to_display.append(col)
+
+                    st.dataframe(df[columns_to_display])
+        else :
+            st.write("No calculation results available.")
+
+        if st.session_state.material :
+            st.subheader("Input data")
+            with st.expander("Press to check input data", expanded=False) :
+
+                st.subheader("Material")
+                st.write(f"**Name:** {st.session_state.material.name}")
+                st.write(f"**Specific Gravity:** {st.session_state.material.specific_gravity}")
+                st.write(f"**Fiber Saturation Point:** {st.session_state.material.fibre_saturation_point}%")
+                st.write(f"**Tension Strength:** {st.session_state.material.tension_strength} kgf/cm2")
+                st.write(f"**Bending Strength:** {st.session_state.material.bending_strength} kgf/cm2")
+                st.write(f"**Shear Strength:** {st.session_state.material.shear_strength} kgf/cm2")
+                st.write(
+                    f"**Compression Parallel Strength:** {st.session_state.material.compression_parallel_strength} kgf/cm2")
+                st.write(
+                    f"**Compression Perpendicular Strength:** {st.session_state.material.compression_perpendicular_strength} kgf/cm2")
+                st.write(f"**Elastic Modulus:** {st.session_state.material.elastic_modulus} kgf/cm2")
+
+                st.subheader("Adjustment Factors")
+                for factor_type, factors in st.session_state.adjustment_factors.items() :
+                    st.write(f"**{factor_type.replace('_', ' ').title()}:**")
+                    for field in factors.__dataclass_fields__ :
+                        value = getattr(factors, field)
+                        st.write(f"- {field.replace('_', ' ').title()}: {value}")
+
+                st.subheader("Sections")
+                for section in st.session_state.sections :
+                    st.write(f"- **{section.name}:** Depth: {section.depth} cm, Width: {section.width} cm")
+
+                st.subheader("Elements")
+                for element in st.session_state.elements :
+                    st.write(f"- **{element.name}:** Length: {element.length} cm")
+
+
+if __name__ == "__main__" :
+    main()

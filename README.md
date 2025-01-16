@@ -1,2 +1,1 @@
-# Final_Project_PfSE
-Final Project of the Python for Structural Engineers Course
+La aplicación no da el resultado para capacidad a la compresión perpendicular. 
