@@ -344,6 +344,7 @@ def main() :
                         compression_factors_zz=compression_factors_zz,
                         compression_perp_factors=compression_perp_factors,
                         elastic_modulus_factors=elastic_modulus_factors,
+                        support_area_values=st.session_state.support_area_values
                     )
                     st.write("", st.session_state.results_df)
                 except Exception as e :
@@ -360,7 +361,7 @@ def main() :
                 df = pd.DataFrame(st.session_state.forces_data)
                 if not df.empty :
                     df.insert(0, 'force', df['name'])
-                    dcr_max_values_dict = {}  # Usar un diccionario para almacenar los valores máximos de DCR por fuerza
+                    dcr_max_values_dict = {}
                     for _, results_row in st.session_state.results_df.iterrows() :
                         force_name = results_row["force"]
                         if force_name not in dcr_max_values_dict :
@@ -368,7 +369,6 @@ def main() :
                                 "tension (dcr)", "biaxial bending (dcr)",
                                 "shear y (dcr)", "shear z (dcr)",
                                 "compression (dcr)", "bending and compression (dcr)", "compression perpendicular (dcr)"
-                                # Se incluye la compresión perpendicular en el calculo del dcr max
                             ])
 
                     dcr_max_values = [dcr_max_values_dict.get(force_name, 0) for force_name in df['force']]
@@ -418,7 +418,6 @@ def main() :
                             "tension (dcr)", "biaxial bending (dcr)",
                             "shear y (dcr)", "shear z (dcr)",
                             "compression (dcr)", "bending and compression (dcr)", "compression perpendicular (dcr)"
-                            # Se agrega la compresion perpendicular
                         ])
 
                         capacity_data = {
@@ -432,7 +431,6 @@ def main() :
                             "compression_yy_capacity" : compression_capacity_yy,
                             "compression_zz_capacity" : compression_capacity_zz,
                             "compression_perp_capacity" : compression_perp_capacity,
-                            # Se agrega la compresion perpendicular
                             "dcr_max" : dcr_max_value
                         }
                         all_capacities.append(capacity_data)
@@ -442,7 +440,7 @@ def main() :
                     st.dataframe(capacities_df[["member", "section", "force", "dcr_max", "tension_capacity",
                                                 "bending_yy_capacity", "bending_zz_capacity", "shear_capacity",
                                                 "compression_yy_capacity", "compression_zz_capacity",
-                                                "compression_perp_capacity"]])  # Se agrega la compresion perpendicular
+                                                "compression_perp_capacity"]])
 
             with dcr_tab :
                 st.subheader("Demand-Capacity Ratio (DCR)")
@@ -455,7 +453,7 @@ def main() :
                         dcr_max_value = max(row.get(key, 0) for key in [
                             "tension (dcr)", "shear y (dcr)", "shear z (dcr)",
                             "compression (dcr)", "biaxial bending (dcr)", "bending and compression (dcr)",
-                            "compression perpendicular (dcr)"  # Se agrega la compresion perpendicular
+                            "compression perpendicular (dcr)"
                         ])
                         dcr_max_values.append(dcr_max_value)
 
