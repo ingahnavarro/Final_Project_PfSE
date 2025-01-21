@@ -154,7 +154,7 @@ def main() :
         length = st.sidebar.number_input("Length (cm)", 10.0, 1000.0, 300.0)
         effective_length_factor_yy = st.sidebar.number_input("Effective Length Factor YY", 0.1, 2.2, 1.0)
         effective_length_factor_zz = st.sidebar.number_input("Effective Length Factor ZZ", 0.1, 2.2, 1.0)
-        support_area = st.sidebar.number_input("Support Area (cm2)", 0.1, 10000.0, 1000.0)
+        support_area = st.sidebar.number_input("Support Area (cm2)", 0.1, 10000.0, 100.0)
 
         member_definition = MemberDefinition(
             name=element_name,
