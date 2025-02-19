@@ -57,8 +57,9 @@ def main() :
     st.sidebar.write("Angel Navarro-Mora")
     st.sidebar.write("Tecnológico de Costa Rica")
 
+    st.sidebar.header("Wood Elements Design / Angel Navarro-Mora / Tecnológico de Costa Rica")
 
-
+    
 
     if "material" not in st.session_state :
         st.session_state.material = None
