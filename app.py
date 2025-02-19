@@ -53,7 +53,8 @@ def plot_rectangular_section(section: RectangularSection, color: str) :
 
 
 def main() :
-    st.sidebar.header("Wood Elements Design<br>Angel Navarro-Mora<br>Tecnológico de Costa Rica", unsafe_allow_html=True)
+    st.sidebar.markdown("### Wood Elements Design\n### Angel Navarro-Mora\n### Tecnológico de Costa Rica")
+
 
 
     if "material" not in st.session_state :
