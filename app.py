@@ -53,7 +53,10 @@ def plot_rectangular_section(section: RectangularSection, color: str) :
 
 
 def main() :
-    st.sidebar.markdown("### Wood Elements Design\n### Angel Navarro-Mora\n### Tecnológico de Costa Rica")
+    st.sidebar.write("**Wood Elements Design**")
+    st.sidebar.write("Angel Navarro-Mora")
+    st.sidebar.write("Tecnológico de Costa Rica")
+
 
 
 
